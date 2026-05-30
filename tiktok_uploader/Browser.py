@@ -7,14 +7,25 @@ import subprocess, threading, os
 WITH_PROXIES = False
 
 
-def _get_chrome_major_version() -> int:
-    """Detect the major version of the system-installed Chrome/Chromium so
-    undetected-chromedriver downloads the matching ChromeDriver binary."""
-    for binary in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
+def _get_chrome_major_version(browser_executable_path: str = None) -> int:
+    """Detect the installed Chrome/Chromium major version for ChromeDriver."""
+    candidates = []
+    if browser_executable_path:
+        candidates.append(browser_executable_path)
+    candidates.extend((
+        "google-chrome",
+        "google-chrome-stable",
+        "chromium",
+        "chromium-browser",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    ))
+
+    for binary in candidates:
         try:
             out = subprocess.check_output([binary, "--version"], stderr=subprocess.DEVNULL).decode()
             return int(out.strip().split()[-1].split(".")[0])
-        except (FileNotFoundError, ValueError, IndexError):
+        except (FileNotFoundError, subprocess.CalledProcessError, ValueError, IndexError):
             continue
     return 0  # fall back to latest if detection fails
 
@@ -42,7 +53,13 @@ class Browser:
         # Proxies not supported on login.
         # if WITH_PROXIES:
         #     options.add_argument('--proxy-server={}'.format(PROXIES[0]))
-        self._driver = uc.Chrome(options=options, version_main=_get_chrome_major_version())
+        browser_executable_path = uc.find_chrome_executable()
+        chrome_major = _get_chrome_major_version(browser_executable_path)
+        self._driver = uc.Chrome(
+            options=options,
+            browser_executable_path=browser_executable_path,
+            version_main=chrome_major,
+        )
         self.with_random_user_agent()
 
     def with_random_user_agent(self, fallback=None):

@@ -1,13 +1,32 @@
-import requests, secrets, string, uuid, zlib, json, re, time, subprocess
+import os, requests, secrets, string, uuid, zlib, json, re, time, subprocess
 from requests_auth_aws_sigv4 import AWSSigV4
 
 
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 
-def subprocess_jsvmp(js, user_agent, url):
-	proc = subprocess.Popen(['node', js, url, user_agent], stdout=subprocess.PIPE)
-	return proc.stdout.read().decode('utf-8')
+def subprocess_jsvmp(js, user_agent, url, timeout=None):
+	if timeout is None:
+		timeout = float(os.getenv("TIKTOK_SIGNATURE_TIMEOUT_SECONDS", "60"))
+	try:
+		proc = subprocess.run(
+			['node', js, url, user_agent],
+			stdout=subprocess.PIPE,
+			stderr=subprocess.PIPE,
+			text=True,
+			timeout=timeout,
+			check=False,
+		)
+	except subprocess.TimeoutExpired as exc:
+		raise RuntimeError(f"TikTok signature generator timed out after {timeout:g}s") from exc
+	if proc.returncode != 0:
+		details = proc.stderr.strip() or proc.stdout.strip() or f"exit code {proc.returncode}"
+		raise RuntimeError(f"TikTok signature generator failed: {details[-1000:]}")
+	output = proc.stdout.strip()
+	if not output:
+		details = proc.stderr.strip()
+		raise RuntimeError(f"TikTok signature generator returned no output: {details[-1000:]}")
+	return output
 
 
 def generate_random_string(length, underline):
