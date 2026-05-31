@@ -97,7 +97,7 @@ def upload_video(session_user, video, title, schedule_time=0, allow_comment=1, a
 	print("User successfully logged in.")
 	print(f"Tiktok Datacenter Assigned: {dc_id}")
 	
-	print("Uploading video...")
+	print("Uploading video...", flush=True)
 	# Parameter validation,
 	if schedule_time and (schedule_time > 864000 or schedule_time < 900):
 		print("[-] Cannot schedule video in more than 10 days or less than 20 minutes")
@@ -140,7 +140,11 @@ def upload_video(session_user, video, title, schedule_time=0, allow_comment=1, a
 
 	# get project_id
 	project_id = r.json()["project"]["project_id"]
-	video_id, session_key, upload_id, crcs, upload_host, store_uri, video_auth, aws_auth = upload_to_tiktok(video, session)
+	upload_result = upload_to_tiktok(video, session)
+	if not upload_result:
+		return False
+	video_id, session_key, upload_id, crcs, upload_host, store_uri, video_auth, aws_auth = upload_result
+	print("[upload] Video file transfer complete; finalizing upload...", flush=True)
 
 	url = f"https://{upload_host}/{store_uri}?uploadID={upload_id}&phase=finish&uploadmode=part"
 	headers = {
@@ -419,6 +423,7 @@ def upload_to_tiktok(video_file, session):
 	with open(video_path, "rb") as f:
 		video_content = f.read()
 	file_size = len(video_content)
+	print(f"[upload] Preparing {os.path.basename(video_path)} ({file_size / (1024 * 1024):.2f} MB)", flush=True)
 	url = f"https://www.tiktok.com/top/v1?Action=ApplyUploadInner&Version=2020-11-19&SpaceName=tiktok&FileType=video&IsInner=1&FileSize={file_size}&s=g158iqx8434"
 
 	r = session.get(url, auth=aws_auth)
@@ -440,7 +445,10 @@ def upload_to_tiktok(video_file, session):
 		i += chunk_size
 	crcs = []
 	upload_id = str(uuid.uuid4())
-	for i in range(len(chunks)):
+	total_chunks = len(chunks)
+	uploaded_bytes = 0
+	print(f"[upload] Uploading {total_chunks} chunk(s)...", flush=True)
+	for i in range(total_chunks):
 		chunk = chunks[i]
 		crc = crc32(chunk)
 		crcs.append(crc)
@@ -453,6 +461,15 @@ def upload_to_tiktok(video_file, session):
 		}
 
 		r = session.post(url, headers=headers, data=chunk)
+		if not assert_success(url, r):
+			return False
+		uploaded_bytes += len(chunk)
+		percent = (uploaded_bytes / file_size * 100) if file_size else 100
+		print(
+			f"[upload] Chunk {i + 1}/{total_chunks} complete "
+			f"({uploaded_bytes}/{file_size} bytes, {percent:.1f}%)",
+			flush=True,
+		)
 
 	return video_id, session_key, upload_id, crcs, upload_host, store_uri, video_auth, aws_auth
 
